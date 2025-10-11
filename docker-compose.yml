@@ -1,5 +1,3 @@
-# docker-compose.yml (SIN la línea version)
-
 services:
   postgres-primary:
     image: postgres:${POSTGRES_VERSION}
@@ -24,12 +22,14 @@ services:
       retries: 5
     command: >
       postgres
+      -c listen_addresses='*'
       -c wal_level=replica
       -c max_wal_senders=10
       -c wal_keep_size=64
       -c archive_mode=on
       -c archive_command='test ! -f /var/lib/postgresql/archives/%f && cp %p /var/lib/postgresql/archives/%f'
       -c hot_standby=on
+      -c max_connections=100
 
   postgres-standby:
     image: postgres:${POSTGRES_VERSION}
@@ -40,7 +40,7 @@ services:
       - PGDATA=/var/lib/postgresql/data
     volumes:
       - standby_data:/var/lib/postgresql/data
-      - ./postgres_scripts/replica/entrypoint.sh:/entrypoint.sh
+      - ./postgres_scripts/replica/entrypoint.sh:/entrypoint.sh:ro
     entrypoint: /entrypoint.sh
     command: ["standby"]
     networks:
@@ -60,7 +60,7 @@ services:
       - PGDATA=/var/lib/postgresql/data
     volumes:
       - replica_data:/var/lib/postgresql/data
-      - ./postgres_scripts/replica/entrypoint.sh:/entrypoint.sh
+      - ./postgres_scripts/replica/entrypoint.sh:/entrypoint.sh:ro
     entrypoint: /entrypoint.sh
     command: ["replica"]
     networks:

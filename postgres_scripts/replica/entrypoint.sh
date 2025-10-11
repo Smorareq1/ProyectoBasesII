@@ -4,54 +4,72 @@
 set -e
 
 MODE=${1:-replica}
+export PGDATA=/var/lib/postgresql/data
 
 echo "=== Starting PostgreSQL in $MODE mode ==="
+echo "PGDATA: $PGDATA"
 
-# Esperar a que el primario esté completamente listo
+# Esperar a que el primario esté listo
 echo "Waiting for primary to be ready..."
-until PGPASSWORD=adminpass pg_isready -h postgres-primary -p 5432 -U admin -d sanjuanero_db -t 30; do
-  echo "Primary is unavailable - sleeping..."
+sleep 10
+
+COUNTER=0
+MAX_TRIES=60
+
+while [ $COUNTER -lt $MAX_TRIES ]; do
+  if PGPASSWORD=adminpass psql -h postgres-primary -p 5432 -U admin -d sanjuanero_db -c "SELECT 1" >/dev/null 2>&1; then
+    echo "✓ Primary is ready and accepting SQL connections!"
+    break
+  fi
+
+  COUNTER=$((COUNTER+1))
+
+  if [ $((COUNTER % 10)) -eq 0 ]; then
+    echo "Still waiting... attempt $COUNTER/$MAX_TRIES"
+  fi
+
   sleep 3
 done
 
-echo "✓ Primary is ready!"
-
-# Si el directorio de datos está vacío, hacer backup
-if [ ! -s "$PGDATA/PG_VERSION" ]; then
-  echo "Initializing replica from primary..."
-
-  # Limpiar el directorio de datos
-  rm -rf ${PGDATA}/*
-
-  # Hacer el backup base SIN solicitar contraseña
-  echo "Running pg_basebackup..."
-  PGPASSWORD=adminpass pg_basebackup \
-    -h postgres-primary \
-    -p 5432 \
-    -U admin \
-    -D ${PGDATA} \
-    -Fp \
-    -Xs \
-    -P \
-    -R \
-    -v
-
-  echo "✓ Backup completed successfully!"
-
-  # Configurar según el modo
-  if [ "$MODE" = "standby" ]; then
-    echo "Configuring as HOT STANDBY (can be promoted)..."
-    echo "hot_standby = on" >> ${PGDATA}/postgresql.conf
-  else
-    echo "Configuring as READ-ONLY REPLICA..."
-    echo "hot_standby = on" >> ${PGDATA}/postgresql.conf
-  fi
-
-  # Ajustar permisos
-  chmod 700 ${PGDATA}
-  chown -R postgres:postgres ${PGDATA} 2>/dev/null || true
+if [ $COUNTER -eq $MAX_TRIES ]; then
+  echo "ERROR: Could not connect to primary"
+  exit 1
 fi
 
-# Iniciar PostgreSQL
+# Verificar si ya está inicializado
+if [ -f "$PGDATA/PG_VERSION" ]; then
+  echo "Data directory already initialized, starting PostgreSQL..."
+  chown -R postgres:postgres $PGDATA
+  exec gosu postgres postgres
+fi
+
+# Inicializar desde el primario
+echo "Initializing replica from primary..."
+rm -rf $PGDATA/*
+
+echo "Running pg_basebackup from postgres-primary:5432..."
+PGPASSWORD=adminpass pg_basebackup \
+  -h postgres-primary \
+  -p 5432 \
+  -U admin \
+  -D $PGDATA \
+  -Fp \
+  -Xs \
+  -P \
+  -R \
+  -v
+
+echo "✓ Backup completed!"
+
+# Configurar hot_standby
+echo "hot_standby = on" >> $PGDATA/postgresql.conf
+
+# Ajustar permisos para el usuario postgres
+chown -R postgres:postgres $PGDATA
+chmod 700 $PGDATA
+
+echo "✓ Configured as $MODE"
 echo "Starting PostgreSQL server..."
-exec postgres
+
+# Iniciar PostgreSQL como usuario postgres
+exec gosu postgres postgres
