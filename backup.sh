@@ -14,8 +14,7 @@ echo ""
 
 mkdir -p $BACKUP_DIR/full
 mkdir -p $BACKUP_DIR/incremental
-mkdir -p $BACKUP_DIR/wal
-
+# Verificar que el primario esté disponible
 echo "1. Verificando estado del servidor primario..."
 if ! docker exec postgres-primary pg_isready -U admin > /dev/null 2>&1; then
   echo "ERROR: El servidor primario no está disponible"
