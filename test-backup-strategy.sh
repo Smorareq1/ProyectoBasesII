@@ -49,7 +49,7 @@ do_backup() {
     fi
   else
     echo "  → Ejecutando backup incremental..."
-    ./backup.sh > /tmp/backup_output.log 2>&1
+    ./backup.sh incremental > /tmp/backup_output.log 2>&1  # ← AGREGAR "incremental"
     if [ $? -eq 0 ]; then
       echo "  ✓ Backup incremental completado"
     else
@@ -183,7 +183,8 @@ echo "  ✅ PRUEBA COMPLETADA EXITOSAMENTE"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
 echo "📌 Resumen:"
-echo "  • Full backups: $(ls ./backups/full/*.tar.gz 2>/dev/null | wc -l)"
+FULL_COUNT=$(ls ./backups/full/*.sql.gz ./backups/full/*.tar.gz 2>/dev/null | wc -l)
+echo "  • Full backups: $FULL_COUNT"
 echo "  • Backups incrementales: $INCR_COUNT"
 echo "  • Datos insertados: 7 registros de la semana"
 echo "  • Archivos WAL: $WAL_COUNT"

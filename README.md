@@ -39,7 +39,7 @@ docker-compose ps
 ### 3.1 Backup Incremental (diario)
 
 ```bash
-./backup.sh
+./backup.sh incremental
 ```
 
 **Qué hace:** Copia archivos WAL (solo cambios)

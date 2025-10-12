@@ -8,13 +8,13 @@ DAY_OF_WEEK=$(date +%u)
 
 echo "=== ESTRATEGIA DE RESPALDOS POLLO SANJUANERO ==="
 echo "Fecha: $(date)"
-echo "Directorio: $BACKUP_DIR"
+echo "Directorio: ./backups"
 echo "Retención: $RETENTION_DAYS días"
 echo ""
 
 mkdir -p $BACKUP_DIR/full
 mkdir -p $BACKUP_DIR/incremental
-# Verificar que el primario esté disponible
+
 echo "1. Verificando estado del servidor primario..."
 if ! docker exec postgres-primary pg_isready -U admin > /dev/null 2>&1; then
   echo "ERROR: El servidor primario no está disponible"
@@ -24,60 +24,39 @@ echo "✓ Servidor primario operacional"
 echo ""
 
 # Determinar tipo de backup
-BACKUP_TYPE="incremental"
-if [ "$1" == "full" ] || [ $DAY_OF_WEEK -eq 7 ]; then
+if [ "$1" == "full" ]; then
   BACKUP_TYPE="full"
+elif [ "$1" == "incremental" ]; then
+  BACKUP_TYPE="incremental"
+elif [ $DAY_OF_WEEK -eq 7 ]; then
+  BACKUP_TYPE="full"
+else
+  BACKUP_TYPE="incremental"
 fi
 
 echo "2. Tipo de backup: $BACKUP_TYPE"
 echo ""
 
 if [ "$BACKUP_TYPE" == "full" ]; then
-  # FULL BACKUP
+  # FULL BACKUP - Versión simplificada con pg_dump
   echo "=== EJECUTANDO FULL BACKUP ==="
-  BACKUP_FILE="$BACKUP_DIR/full/full_backup_$DATE.tar.gz"
-  TEMP_BACKUP_DIR="/tmp/pg_backup_$DATE"
+  BACKUP_FILE="$BACKUP_DIR/full/full_backup_$DATE.sql.gz"
 
-  echo "Creando backup en el contenedor..."
+  echo "Creando dump completo de la base de datos..."
 
-  # Crear directorio temporal
-  docker exec postgres-primary mkdir -p $TEMP_BACKUP_DIR
+  docker exec postgres-primary pg_dump \
+    -U admin \
+    -d sanjuanero_db \
+    --verbose 2>&1 | gzip > "$BACKUP_FILE"
 
-  # Hacer el backup (formato tar comprimido)
-  docker exec -e PGPASSWORD=replicapass postgres-primary pg_basebackup \
-    -h localhost \
-    -U replicator \
-    -D $TEMP_BACKUP_DIR \
-    -Ft \
-    -z \
-    -P
-
-  if [ $? -eq 0 ]; then
-    echo "Backup creado, copiando al host..."
-
-    # Ver qué archivos se crearon
-    echo "Archivos generados:"
-    docker exec postgres-primary ls -lh $TEMP_BACKUP_DIR
-
-    # Copiar TODO el directorio
-    docker cp postgres-primary:$TEMP_BACKUP_DIR/. "$BACKUP_DIR/full/backup_$DATE/"
-
-    # Comprimir todo en un solo archivo
-    cd "$BACKUP_DIR/full"
-    tar -czf "full_backup_$DATE.tar.gz" "backup_$DATE"
-    rm -rf "backup_$DATE"
-    cd - > /dev/null
-
-    # Limpiar el contenedor
-    docker exec postgres-primary rm -rf $TEMP_BACKUP_DIR
-
+  if [ $? -eq 0 ] && [ -f "$BACKUP_FILE" ]; then
     BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
     echo "✓ Full backup completado: $BACKUP_FILE"
     echo "  Tamaño: $BACKUP_SIZE"
     echo ""
   else
     echo "ERROR: Full backup falló"
-    docker exec postgres-primary rm -rf $TEMP_BACKUP_DIR 2>/dev/null
+    rm -f "$BACKUP_FILE"
     exit 1
   fi
 else
@@ -90,14 +69,25 @@ else
   INCREMENTAL_DIR="$BACKUP_DIR/incremental/wal_$DATE"
   mkdir -p "$INCREMENTAL_DIR"
 
-  docker exec postgres-primary bash -c "cp /var/lib/postgresql/archives/* /tmp/" 2>/dev/null || true
-  docker cp postgres-primary:/tmp/. "$INCREMENTAL_DIR/" 2>/dev/null || true
+  # Limpiar /tmp en el contenedor
+  docker exec postgres-primary bash -c "rm -rf /tmp/wal_backup && mkdir -p /tmp/wal_backup" 2>/dev/null
+
+  # Copiar WAL a tmp
+  docker exec postgres-primary bash -c "cp /var/lib/postgresql/archives/* /tmp/wal_backup/" 2>/dev/null || true
+
+  # Copiar del contenedor al host
+  docker cp postgres-primary:/tmp/wal_backup/. "$INCREMENTAL_DIR/" 2>/dev/null || true
+
+  # Limpiar tmp
+  docker exec postgres-primary bash -c "rm -rf /tmp/wal_backup" 2>/dev/null
 
   WAL_COUNT=$(ls -1 "$INCREMENTAL_DIR" 2>/dev/null | wc -l)
 
   if [ $WAL_COUNT -gt 0 ]; then
+    WAL_SIZE=$(du -sh "$INCREMENTAL_DIR" | cut -f1)
     echo "✓ Backup incremental completado: $INCREMENTAL_DIR"
     echo "  Archivos WAL copiados: $WAL_COUNT"
+    echo "  Tamaño total: $WAL_SIZE"
     echo ""
   else
     echo "⚠ No se encontraron archivos WAL nuevos"
@@ -114,22 +104,29 @@ docker exec postgres-primary psql -U admin -d sanjuanero_db -c "SELECT pg_curren
 echo ""
 
 echo "5. Limpieza de backups antiguos (>$RETENTION_DAYS días)..."
-DELETED_FULL=$(find $BACKUP_DIR/full -type f -name "*.tar.gz" -mtime +$RETENTION_DAYS -delete 2>/dev/null | wc -l)
-DELETED_INCR=$(find $BACKUP_DIR/incremental -type d -name "wal_*" -mtime +$RETENTION_DAYS -delete 2>/dev/null | wc -l)
+find $BACKUP_DIR/full -type f -mtime +$RETENTION_DAYS -delete 2>/dev/null
+find $BACKUP_DIR/incremental -type d -name "wal_*" -mtime +$RETENTION_DAYS -exec rm -rf {} + 2>/dev/null
 
-echo "  Full backups eliminados: $DELETED_FULL"
-echo "  Incrementales eliminados: $DELETED_INCR"
+echo "✓ Limpieza completada"
 echo ""
 
 echo "6. Resumen de backups actuales:"
 echo ""
 echo "Full Backups:"
-ls -lh $BACKUP_DIR/full/*.tar.gz 2>/dev/null || echo "  (Sin backups full)"
+FULL_COUNT=$(ls $BACKUP_DIR/full/*.{gz,tar.gz} 2>/dev/null | wc -l)
+if [ $FULL_COUNT -gt 0 ]; then
+  ls -lh $BACKUP_DIR/full/
+else
+  echo "  (Sin backups full)"
+fi
 echo ""
 echo "Backups Incrementales:"
 INCR_COUNT=$(ls -d $BACKUP_DIR/incremental/wal_* 2>/dev/null | wc -l)
 echo "  Total: $INCR_COUNT backups incrementales"
-ls -ld $BACKUP_DIR/incremental/wal_* 2>/dev/null | tail -3 || echo "  (Sin incrementales)"
+if [ $INCR_COUNT -gt 0 ]; then
+  echo "  Últimos 3:"
+  ls -ld $BACKUP_DIR/incremental/wal_* 2>/dev/null | tail -3
+fi
 echo ""
 
 TOTAL_SIZE=$(du -sh $BACKUP_DIR 2>/dev/null | cut -f1)
