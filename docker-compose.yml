@@ -35,6 +35,7 @@ services:
     image: postgres:${POSTGRES_VERSION}
     container_name: ${STANDBY_CONTAINER_NAME}
     hostname: ${STANDBY_HOSTNAME}
+    user: postgres
     environment:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER}
@@ -57,7 +58,10 @@ services:
     image: postgres:${POSTGRES_VERSION}
     container_name: ${REPLICA_CONTAINER_NAME}
     hostname: ${REPLICA_HOSTNAME}
+    user: postgres
     environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - PGDATA=/var/lib/postgresql/data
     volumes:
