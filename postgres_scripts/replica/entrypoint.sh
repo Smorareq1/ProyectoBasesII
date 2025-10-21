@@ -39,8 +39,7 @@ fi
 # Verificar si ya está inicializado
 if [ -f "$PGDATA/PG_VERSION" ]; then
   echo "Data directory already initialized, starting PostgreSQL..."
-  chown -R postgres:postgres $PGDATA
-  exec gosu postgres postgres
+  exec postgres
 fi
 
 # Inicializar desde el primario
@@ -65,11 +64,10 @@ echo "✓ Backup completed!"
 echo "hot_standby = on" >> $PGDATA/postgresql.conf
 
 # Ajustar permisos para el usuario postgres
-chown -R postgres:postgres $PGDATA
 chmod 700 $PGDATA
 
 echo "✓ Configured as $MODE"
 echo "Starting PostgreSQL server..."
 
 # Iniciar PostgreSQL como usuario postgres
-exec gosu postgres postgres
+exec postgres

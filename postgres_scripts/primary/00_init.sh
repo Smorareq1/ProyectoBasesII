@@ -7,7 +7,6 @@ echo "=== Configurando PostgreSQL primario ==="
 
 # Crear directorio para archivos WAL archivados
 mkdir -p /var/lib/postgresql/archives
-chown postgres:postgres /var/lib/postgresql/archives
 chmod 700 /var/lib/postgresql/archives
 echo "✓ Directorio de archivos WAL creado"
 
