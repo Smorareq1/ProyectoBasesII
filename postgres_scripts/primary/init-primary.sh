@@ -1,5 +1,5 @@
 #!/bin/bash
-# postgres_scripts/primary/init-primary.sh
+# postgres_scripts/primary/01_init-primary.sh
 
 set -e
 
