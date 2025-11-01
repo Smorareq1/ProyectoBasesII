@@ -1,6 +1,11 @@
 #!/bin/bash
 # backup.sh - Estrategia de respaldos con retención de 7 días
 
+# Cargar variables del .env
+if [ -f .env ]; then
+  export $(cat .env | grep -v '^#' | xargs)
+fi
+
 BACKUP_DIR="./backups"
 RETENTION_DAYS=7
 DATE=$(date +%Y%m%d_%H%M%S)
@@ -16,7 +21,7 @@ mkdir -p $BACKUP_DIR/full
 mkdir -p $BACKUP_DIR/incremental
 
 echo "1. Verificando estado del servidor primario..."
-if ! docker exec postgres-primary pg_isready -U admin > /dev/null 2>&1; then
+if ! docker exec postgres-primary pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} > /dev/null 2>&1; then
   echo "ERROR: El servidor primario no está disponible"
   exit 1
 fi
@@ -45,8 +50,8 @@ if [ "$BACKUP_TYPE" == "full" ]; then
   echo "Creando dump completo de la base de datos..."
 
   docker exec postgres-primary pg_dump \
-    -U admin \
-    -d sanjuanero_db \
+    -U ${POSTGRES_USER} \
+    -d ${POSTGRES_DB} \
     --verbose 2>&1 | gzip > "$BACKUP_FILE"
 
   if [ $? -eq 0 ] && [ -f "$BACKUP_FILE" ]; then
@@ -63,7 +68,7 @@ else
   # BACKUP INCREMENTAL
   echo "=== EJECUTANDO BACKUP INCREMENTAL ==="
   echo "Forzando cambio de segmento WAL..."
-  docker exec postgres-primary psql -U admin -d sanjuanero_db -c "SELECT pg_switch_wal();" > /dev/null
+  docker exec postgres-primary psql -U ${POSTGRES_USER} -d ${POSTGRES_DB} -c "SELECT pg_switch_wal();" > /dev/null
 
   echo "Copiando archivos WAL archivados..."
   INCREMENTAL_DIR="$BACKUP_DIR/incremental/wal_$DATE"
@@ -100,7 +105,7 @@ docker exec postgres-primary bash -c "ls -lh /var/lib/postgresql/archives/ 2>/de
 echo ""
 
 echo "4. Información del último checkpoint:"
-docker exec postgres-primary psql -U admin -d sanjuanero_db -c "SELECT pg_current_wal_lsn(), pg_last_wal_replay_lsn();" 2>/dev/null || true
+docker exec postgres-primary psql -U ${POSTGRES_USER} -d ${POSTGRES_DB} -c "SELECT pg_current_wal_lsn(), pg_last_wal_replay_lsn();" 2>/dev/null || true
 echo ""
 
 echo "5. Limpieza de backups antiguos (>$RETENTION_DAYS días)..."

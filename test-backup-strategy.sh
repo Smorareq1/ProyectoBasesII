@@ -3,6 +3,11 @@
 
 set -e  # Detener si hay error
 
+# Cargar variables del .env
+if [ -f .env ]; then
+  export $(cat .env | grep -v '^#' | xargs)
+fi
+
 echo "═══════════════════════════════════════════════════════════"
 echo "  PRUEBA DE ESTRATEGIA DE RESPALDOS - POLLO SANJUANERO"
 echo "═══════════════════════════════════════════════════════════"
@@ -10,7 +15,7 @@ echo ""
 
 # Verificar que el primario esté disponible
 echo "Verificando servidor primario..."
-if ! docker exec postgres-primary pg_isready -U admin > /dev/null 2>&1; then
+if ! docker exec postgres-primary pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} > /dev/null 2>&1; then
   echo "ERROR: El servidor primario no está disponible"
   echo "Ejecuta: docker-compose up -d"
   exit 1
@@ -30,7 +35,7 @@ echo ""
 insert_data() {
   local mensaje=$1
   echo "  → Insertando: $mensaje"
-  docker exec postgres-primary psql -U admin -d sanjuanero_db -c \
+  docker exec postgres-primary psql -U ${POSTGRES_USER} -d ${POSTGRES_DB} -c \
     "INSERT INTO test_replication (mensaje) VALUES ('$mensaje');" > /dev/null
   echo "  ✓ Datos insertados"
 }
@@ -49,7 +54,7 @@ do_backup() {
     fi
   else
     echo "  → Ejecutando backup incremental..."
-    ./backup.sh incremental > /tmp/backup_output.log 2>&1  # ← AGREGAR "incremental"
+    ./backup.sh incremental > /tmp/backup_output.log 2>&1
     if [ $? -eq 0 ]; then
       echo "  ✓ Backup incremental completado"
     else
@@ -165,7 +170,7 @@ echo ""
 
 echo "📝 Datos insertados durante la semana:"
 echo "─────────────────────────────────────────────────────────"
-docker exec postgres-primary psql -U admin -d sanjuanero_db -c \
+docker exec postgres-primary psql -U ${POSTGRES_USER} -d ${POSTGRES_DB} -c \
   "SELECT id, mensaje, fecha_creacion FROM test_replication ORDER BY id DESC LIMIT 10;"
 echo ""
 
